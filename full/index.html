@@ -500,6 +500,7 @@
             <button type="button" class="btn btn-ghost btn-sm method-btn" id="chamCongFilterLateBtn" onclick="setChamCongFilter('late')">Đi muộn</button>
           </div>
           <button class="btn btn-ghost btn-full btn-sm" style="margin-top:10px;" onclick="loadCheckInHistory()">Xem</button>
+          <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px;" onclick="exportChamCongCSV()">⬇️ Xuất file (Excel/CSV)</button>
           <div id="lateSummaryWrap" style="margin-top:10px;"></div>
           <div id="chamCongHistoryResult" style="margin-top:10px;"></div>
         </div>
@@ -706,8 +707,13 @@
       <div class="card">
         <label class="field-label">Chọn tháng</label>
         <input type="month" id="payrollMonth">
-        <button class="btn btn-in btn-full" style="margin-top:10px;" onclick="runPayroll()">Tính lương tháng này</button>
+        <div class="row" style="gap:8px;margin-top:10px;">
+          <button class="btn btn-in btn-full" onclick="runPayroll()">Tính lương tháng này</button>
+          <button class="btn btn-ghost btn-full" onclick="viewPayroll()">Xem lại</button>
+        </div>
         <div id="payrollResult" style="margin-top:10px;font-size:13px;color:var(--ink-soft);"></div>
+        <div id="payrollTableWrap" style="margin-top:10px;"></div>
+        <button class="btn btn-ghost btn-full btn-sm" id="payrollExportBtn" style="margin-top:10px;display:none;" onclick="exportPayrollCSV()">⬇️ Xuất file (Excel/CSV)</button>
       </div>
     </div>
 
@@ -863,6 +869,9 @@ function attachMoneyInput(id){
   if(el) el.value = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
 })();
 
+let lastPayrollRows = [];
+let lastPayrollMonth = '';
+
 async function runPayroll(){
   const val = document.getElementById('payrollMonth').value; // yyyy-MM
   const resultEl = document.getElementById('payrollResult');
@@ -872,12 +881,114 @@ async function runPayroll(){
   resultEl.textContent = 'Đang tính lương...';
   try{
     const r = await apiCall('generatePayroll', { month: monthStr });
-    resultEl.textContent = r.rows > 0
-      ? `Đã tính lương tháng ${monthStr}: ${r.rows} nhân viên, tổng quỹ lương ${r.totalFund.toLocaleString('vi-VN')}đ. Xem chi tiết ở sheet "Payroll" trong file Quản lý nhân sự.`
-      : `Không có dữ liệu chấm công trong tháng ${monthStr}.`;
+    if(r.rows > 0){
+      resultEl.textContent = `Đã tính lương tháng ${monthStr}: ${r.rows} nhân viên, tổng quỹ lương ${r.totalFund.toLocaleString('vi-VN')}đ.`;
+      await loadPayrollTable(monthStr);
+    } else {
+      resultEl.textContent = `Không có dữ liệu chấm công trong tháng ${monthStr}.`;
+      lastPayrollRows = [];
+      document.getElementById('payrollTableWrap').innerHTML = '';
+      document.getElementById('payrollExportBtn').style.display = 'none';
+    }
   } catch(err){
     resultEl.textContent = 'Lỗi: ' + err.message;
   }
+}
+
+// Xem lại lương đã tính cho 1 tháng (không tính lại) — dùng khi chỉ muốn xem/xuất file lại.
+async function viewPayroll(){
+  const val = document.getElementById('payrollMonth').value;
+  const resultEl = document.getElementById('payrollResult');
+  if(!val){ resultEl.textContent = 'Vui lòng chọn tháng.'; return; }
+  const [yyyy, mm] = val.split('-');
+  const monthStr = `${mm}/${yyyy}`;
+  resultEl.textContent = 'Đang tải...';
+  await loadPayrollTable(monthStr);
+  resultEl.textContent = lastPayrollRows.length > 0
+    ? `Lương tháng ${monthStr}: ${lastPayrollRows.length} nhân viên.`
+    : `Chưa có lương đã tính cho tháng ${monthStr}. Bấm "Tính lương tháng này" trước.`;
+}
+
+async function loadPayrollTable(monthStr){
+  try{
+    const r = await apiCall('getPayroll', { month: monthStr });
+    lastPayrollRows = r.rows || [];
+    lastPayrollMonth = monthStr;
+    renderPayrollTable();
+  } catch(err){
+    lastPayrollRows = [];
+    document.getElementById('payrollTableWrap').innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+    document.getElementById('payrollExportBtn').style.display = 'none';
+  }
+}
+
+function renderPayrollTable(){
+  const wrap = document.getElementById('payrollTableWrap');
+  const btn = document.getElementById('payrollExportBtn');
+  if(lastPayrollRows.length === 0){
+    wrap.innerHTML = '';
+    btn.style.display = 'none';
+    return;
+  }
+  const totalPay = lastPayrollRows.reduce((s,r) => s + (Number(r.totalPay)||0), 0);
+  wrap.innerHTML = `
+    ${lastPayrollRows.map(r => `
+      <div class="delivered-row">
+        <div class="who">${r.employeeName}</div>
+        <div style="text-align:right;">
+          <div class="mono" style="font-size:12px;color:var(--ink-soft);">${r.totalHours}h × ${Number(r.rate||0).toLocaleString('vi-VN')}đ</div>
+          <div class="mono" style="font-weight:700;font-size:13px;">${Number(r.totalPay||0).toLocaleString('vi-VN')}đ</div>
+        </div>
+      </div>
+    `).join('')}
+    <div class="delivered-row" style="border-top:2px solid var(--border);margin-top:4px;padding-top:10px;">
+      <div class="who" style="font-weight:800;">Tổng cộng</div>
+      <div class="mono" style="font-weight:800;font-size:14px;">${totalPay.toLocaleString('vi-VN')}đ</div>
+    </div>
+  `;
+  btn.style.display = 'block';
+}
+
+function csvEscape_(v){
+  const s = String(v ?? '');
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s;
+}
+function downloadCSV_(filename, headers, rows){
+  const lines = [headers, ...rows].map(row => row.map(csvEscape_).join(','));
+  const csvContent = '﻿' + lines.join('\r\n'); // BOM để Excel hiển thị đúng tiếng Việt
+  const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportChamCongCSV(){
+  if(!lastChamCongRecords || lastChamCongRecords.length === 0){
+    alert('Chưa có dữ liệu để xuất. Vui lòng chọn khoảng ngày và bấm "Xem" trước.');
+    return;
+  }
+  const headers = ['Ngày','Nhân viên','Ca','Giờ vào','Giờ ra','Tổng giờ','Phút đi muộn'];
+  const rows = lastChamCongRecords.map(r => [r.date, r.employeeName, r.ca, r.checkIn, r.checkOut, r.totalHours, r.lateMinutes]);
+  const fromIso = document.getElementById('chamCongHistoryFrom').value || '';
+  const toIso = document.getElementById('chamCongHistoryTo').value || '';
+  downloadCSV_(`ChamCong_${fromIso}_${toIso}.csv`, headers, rows);
+}
+
+function exportPayrollCSV(){
+  if(!lastPayrollRows || lastPayrollRows.length === 0){
+    alert('Chưa có dữ liệu lương để xuất.');
+    return;
+  }
+  const headers = ['Nhân viên','Tổng giờ công','Đơn giá/giờ','Thành tiền'];
+  const rows = lastPayrollRows.map(r => [r.employeeName, r.totalHours, r.rate, r.totalPay]);
+  const totalPay = lastPayrollRows.reduce((s,r) => s + (Number(r.totalPay)||0), 0);
+  rows.push(['Tổng cộng', '', '', totalPay]);
+  downloadCSV_(`Luong_${(lastPayrollMonth||'').replace('/','-')}.csv`, headers, rows);
 }
 
 // ---------- tabs ----------
