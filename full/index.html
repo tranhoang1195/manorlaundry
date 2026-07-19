@@ -1084,8 +1084,8 @@ function exportChamCongCSV(){
     alert('Chưa có dữ liệu để xuất. Vui lòng chọn khoảng ngày và bấm "Xem" trước.');
     return;
   }
-  const headers = ['Ngày','Nhân viên','Ca','Giờ vào','Giờ ra','Tổng giờ','Phút đi muộn'];
-  const rows = lastChamCongRecords.map(r => [r.date, r.employeeName, r.ca, r.checkIn, r.checkOut, r.totalHours, r.lateMinutes]);
+  const headers = ['Ngày','Nhân viên','Ca','Giờ vào','Giờ ra','Tổng giờ','Phút đi muộn','Phút tăng ca','Tăng ca đã duyệt'];
+  const rows = lastChamCongRecords.map(r => [r.date, r.employeeName, r.ca, r.checkIn, r.checkOut, r.totalHours, r.lateMinutes, r.overtimeMinutes || 0, r.overtimeApproved ? 'Có' : 'Không']);
   const fromIso = document.getElementById('chamCongHistoryFrom').value || '';
   const toIso = document.getElementById('chamCongHistoryTo').value || '';
   downloadCSV_(`ChamCong_${fromIso}_${toIso}.csv`, headers, rows);
@@ -1193,6 +1193,9 @@ document.getElementById('photoInput').addEventListener('change', function(e){
       if(pendingCheckType === 'in' && res.late){
         alert(`Bạn đã đến muộn ${res.lateMinutes} phút (ca ${res.ca}).`);
       }
+      if(pendingCheckType === 'out' && res.overtimeMinutes > 0){
+        alert(`Phát sinh tăng ca ${res.overtimeMinutes} phút hôm nay, chờ Chủ duyệt.`);
+      }
     } catch(err){
       alert('Không lưu được vào hệ thống: ' + err.message);
     } finally{
@@ -1289,11 +1292,14 @@ async function loadMyStatus(dataOverride){
           <div style="font-size:12.5px;color:var(--ink-soft);">Đừng quên Check-out khi hết ca nhé!</div>
         </div>`;
       }
+      const otTag = rec.overtimeMinutes > 0
+        ? `<span class="method-tag" style="background:${rec.overtimeApproved?'#E4F3EC':'#FFF3D6'};color:${rec.overtimeApproved?'var(--brand-dark)':'#8A6100'};margin-left:6px;">Tăng ca ${rec.overtimeMinutes}p${rec.overtimeApproved?' · Đã duyệt':' · Chờ duyệt'}</span>`
+        : '';
       return `<div style="margin-bottom:8px;">
-        <div class="top-line" style="display:flex;align-items:center;gap:8px;margin-bottom:4px;">
+        <div class="top-line" style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:4px;">
           <span class="badge badge-in">${rec.ca ? rec.ca+' ' : ''}${rec.checkIn}</span>
           <span style="color:var(--ink-soft);">→</span>
-          <span class="badge badge-out">${rec.checkOut}</span>${lateTag}
+          <span class="badge badge-out">${rec.checkOut}</span>${lateTag}${otTag}
         </div>
         <div style="font-size:12.5px;color:var(--ink-soft);">Hoàn thành ca${rec.totalHours ? ' · '+rec.totalHours+'h' : ''}.</div>
       </div>`;
@@ -1373,6 +1379,22 @@ function renderLateSummary(){
   }
 }
 
+async function approveOvertime(id){
+  if(!currentUser || currentUser.role !== 'Chu') return;
+  if(!confirm('Xác nhận duyệt tăng ca cho ngày này? Số phút tăng ca sẽ được cộng vào giờ công để tính lương.')) return;
+  showBusy('Đang duyệt tăng ca...');
+  try{
+    await apiCall('approveOvertime', { id });
+    const rec = lastChamCongRecords.find(r => r.id === id);
+    if(rec) rec.overtimeApproved = true;
+    renderChamCongHistoryList();
+  } catch(err){
+    alert('Không duyệt được: ' + err.message);
+  } finally{
+    hideBusy();
+  }
+}
+
 function renderChamCongHistoryList(){
   const el = document.getElementById('chamCongHistoryResult');
   const records = chamCongFilter === 'late' ? lastChamCongRecords.filter(r => r.lateMinutes > 0) : lastChamCongRecords;
@@ -1382,6 +1404,7 @@ function renderChamCongHistoryList(){
       : '<div class="empty-state">Không có dữ liệu chấm công.</div>';
     return;
   }
+  const isOwner = currentUser && currentUser.role === 'Chu';
   el.innerHTML = records.map(rec => {
     const photos = (rec.photo || '').split(' | ').filter(Boolean);
     const inPhoto = photos[0] || '';
@@ -1390,13 +1413,24 @@ function renderChamCongHistoryList(){
       inPhoto ? `<a href="${inPhoto}" target="_blank">Ảnh vào</a>` : '',
       outPhoto ? `<a href="${outPhoto}" target="_blank">Ảnh ra</a>` : ''
     ].filter(Boolean).join(' · ');
+    let otTag = '';
+    if(rec.overtimeMinutes > 0){
+      otTag = rec.overtimeApproved
+        ? `<span class="method-tag" style="background:#E4F3EC;color:var(--brand-dark);">Tăng ca ${rec.overtimeMinutes}p · Đã duyệt</span>`
+        : (isOwner
+          ? `<button onclick="approveOvertime('${rec.id}')" class="method-tag" style="background:#FFF3D6;color:#8A6100;border:none;cursor:pointer;">Tăng ca ${rec.overtimeMinutes}p · Duyệt</button>`
+          : `<span class="method-tag" style="background:#FFF3D6;color:#8A6100;">Tăng ca ${rec.overtimeMinutes}p · Chờ duyệt</span>`);
+    }
     return `
     <div class="delivered-row">
       <div>
         <div class="who">${rec.employeeName}${rec.ca ? ' · '+rec.ca : ''}</div>
         <div class="sub">${rec.date} · Vào: ${rec.checkIn || '—'} · Ra: ${rec.checkOut || '—'}${rec.totalHours ? ' · ' + rec.totalHours + 'h' : ''}${photoLinks ? ' · '+photoLinks : ''}</div>
       </div>
-      ${rec.lateMinutes > 0 ? `<span class="method-tag" style="background:#FDECE6;color:var(--danger);">Muộn ${rec.lateMinutes}p</span>` : ''}
+      <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;">
+        ${rec.lateMinutes > 0 ? `<span class="method-tag" style="background:#FDECE6;color:var(--danger);">Muộn ${rec.lateMinutes}p</span>` : ''}
+        ${otTag}
+      </div>
     </div>
   `;
   }).join('');
