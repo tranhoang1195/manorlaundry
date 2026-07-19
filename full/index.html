@@ -403,6 +403,36 @@
   }
   .pay-modal h3{margin:0 0 14px; font-size:15px;}
   .method-btn.selected{background:var(--brand); color:#fff; border-color:var(--brand);}
+
+  /* Lịch chọn ngày tự viết (thay input type=date) — luôn hiển thị dd/mm/yyyy. */
+  input.date-input-vn{cursor:pointer; background-image:none;}
+  .vn-cal-popup{
+    position:fixed; z-index:200; width:280px;
+    background:#fff; border:1px solid var(--border); border-radius:16px;
+    box-shadow:0 12px 32px rgba(15,35,29,0.22); padding:12px;
+  }
+  .vn-cal-head{display:flex; align-items:center; justify-content:space-between; margin-bottom:8px;}
+  .vn-cal-title{font-weight:800; font-size:13.5px; color:var(--brand-dark); text-transform:capitalize;}
+  .vn-cal-nav{
+    border:1.5px solid var(--border); background:#F1F5F4; color:var(--ink);
+    border-radius:10px; width:30px; height:30px; font-size:14px; font-weight:700; cursor:pointer;
+  }
+  .vn-cal-nav:hover{background:#E4F3EC; border-color:var(--brand);}
+  .vn-cal-dow{display:grid; grid-template-columns:repeat(7,1fr); text-align:center; margin-bottom:4px;}
+  .vn-cal-dow span{font-size:10.5px; font-weight:700; color:var(--ink-soft); text-transform:uppercase;}
+  .vn-cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px;}
+  .vn-cal-day{
+    aspect-ratio:1; display:flex; align-items:center; justify-content:center;
+    border-radius:10px; font-size:12.5px; font-weight:600; color:var(--ink); cursor:pointer; border:none; background:none;
+  }
+  .vn-cal-day:hover{background:#F1F5F4;}
+  .vn-cal-day.outside{color:var(--border);}
+  .vn-cal-day.today{color:var(--brand-dark); font-weight:800; box-shadow:inset 0 0 0 1.5px var(--brand);}
+  .vn-cal-day.selected{background:var(--brand); color:#fff;}
+  .vn-cal-today{
+    width:100%; margin-top:8px; padding:8px; border:none; border-radius:10px;
+    background:#F1F5F4; color:var(--brand-dark); font-weight:700; font-size:12px; cursor:pointer;
+  }
 </style>
 </head>
 <body>
@@ -421,6 +451,18 @@
 </div>
 
 <div id="busyToast" style="display:none;position:fixed;top:12px;left:50%;transform:translateX(-50%);background:var(--brand);color:#fff;padding:8px 16px;border-radius:999px;font-size:13px;font-weight:600;z-index:9999;box-shadow:0 4px 14px rgba(0,0,0,.18);">Đang xử lý...</div>
+
+<!-- Lịch chọn ngày tự viết — luôn hiển thị dd/mm/yyyy, không phụ thuộc ngôn ngữ trình duyệt/hệ điều hành. -->
+<div id="vnCalPopup" class="vn-cal-popup" style="display:none;">
+  <div class="vn-cal-head">
+    <button type="button" class="vn-cal-nav" onclick="vnCalNav_(-1)">←</button>
+    <div class="vn-cal-title" id="vnCalTitle">—</div>
+    <button type="button" class="vn-cal-nav" onclick="vnCalNav_(1)">→</button>
+  </div>
+  <div class="vn-cal-dow" id="vnCalDow"></div>
+  <div class="vn-cal-grid" id="vnCalGrid"></div>
+  <button type="button" class="vn-cal-today" onclick="vnCalToday_()">Hôm nay</button>
+</div>
 
 <div class="app">
 
@@ -492,15 +534,15 @@
         <h2 class="section-title" id="chamCongHistoryTitle">Lịch sử chấm công</h2>
         <div class="card">
           <label class="field-label">Từ ngày</label>
-          <input type="date" id="chamCongHistoryFrom">
+          <input type="text" id="chamCongHistoryFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
           <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-          <input type="date" id="chamCongHistoryTo">
+          <input type="text" id="chamCongHistoryTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
           <div class="row" style="gap:8px;margin-top:10px;">
             <button type="button" class="btn btn-ghost btn-sm method-btn selected" id="chamCongFilterAllBtn" onclick="setChamCongFilter('all')">Tất cả</button>
             <button type="button" class="btn btn-ghost btn-sm method-btn" id="chamCongFilterLateBtn" onclick="setChamCongFilter('late')">Đi muộn</button>
           </div>
           <button class="btn btn-ghost btn-full btn-sm" style="margin-top:10px;" onclick="loadCheckInHistory()">Xem</button>
-          <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px;" onclick="exportChamCongCSV()">⬇️ Xuất file (Excel/CSV)</button>
+          <button class="btn btn-ghost btn-full btn-sm" style="margin-top:8px;" id="chamCongExportBtn" onclick="exportChamCongCSV()">⬇️ Xuất file (Excel/CSV)</button>
           <div id="lateSummaryWrap" style="margin-top:10px;"></div>
           <div id="chamCongHistoryResult" style="margin-top:10px;"></div>
         </div>
@@ -534,9 +576,9 @@
       <h2 class="section-title">Lịch sử đóng gói</h2>
       <div class="card">
         <label class="field-label">Từ ngày</label>
-        <input type="date" id="packageHistoryFrom">
+        <input type="text" id="packageHistoryFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-        <input type="date" id="packageHistoryTo">
+        <input type="text" id="packageHistoryTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <button class="btn btn-ghost btn-full btn-sm" style="margin-top:10px;" onclick="loadPackageHistory()">Xem</button>
       </div>
       <div class="row" style="gap:8px; margin-bottom:10px;">
@@ -595,9 +637,9 @@
         <h2 class="section-title">Xem lại theo ngày</h2>
         <div class="card">
           <label class="field-label">Từ ngày</label>
-          <input type="date" id="traDoHistoryFrom">
+          <input type="text" id="traDoHistoryFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
           <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-          <input type="date" id="traDoHistoryTo">
+          <input type="text" id="traDoHistoryTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
           <div class="row" style="margin-top:10px; gap:8px;">
             <button class="btn btn-ghost btn-full btn-sm" onclick="loadReturnNoticesForDate()">Xem khoảng ngày này</button>
             <button class="btn btn-ghost btn-full btn-sm" onclick="renderDeliveredOrders()">Về hôm nay</button>
@@ -608,7 +650,7 @@
       <h2 class="section-title" id="deliveredListTitle">Đã trả đồ hôm nay</h2>
       <div class="row" style="gap:8px; margin-bottom:10px;">
         <button type="button" class="btn btn-ghost btn-sm method-btn selected" id="filterAllBtn" onclick="setDeliveredFilter('all')">Tất cả</button>
-        <button type="button" class="btn btn-ghost btn-sm method-btn" id="filterUnconfirmedBtn" onclick="setDeliveredFilter('unconfirmed')">Chưa xác nhận</button>
+        <button type="button" class="btn btn-ghost btn-sm method-btn" id="filterUnconfirmedBtn" onclick="setDeliveredFilter('unconfirmed')">Chưa thanh toán</button>
       </div>
       <div id="deliveredList"></div>
     </div>
@@ -618,7 +660,7 @@
       <h2 class="section-title" id="expenseFormTitle">Ghi chi phí mới</h2>
       <div class="card">
         <label class="field-label">Ngày</label>
-        <input type="date" id="expenseDate">
+        <input type="text" id="expenseDate" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
 
         <label class="field-label" style="margin-top:12px;">Loại chi phí</label>
         <select id="expenseCategory">
@@ -648,9 +690,9 @@
       <h2 class="section-title">Lịch sử chi phí</h2>
       <div class="card">
         <label class="field-label">Từ ngày</label>
-        <input type="date" id="expenseHistoryFrom">
+        <input type="text" id="expenseHistoryFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-        <input type="date" id="expenseHistoryTo">
+        <input type="text" id="expenseHistoryTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <label class="field-label" style="margin-top:10px;">Loại chi phí</label>
         <select id="expenseCategoryFilter">
           <option value="all">Tất cả danh mục</option>
@@ -676,9 +718,9 @@
       <h2 class="section-title">Xem báo cáo theo khoảng ngày</h2>
       <div class="card">
         <label class="field-label">Từ ngày</label>
-        <input type="date" id="reportFrom">
+        <input type="text" id="reportFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-        <input type="date" id="reportTo">
+        <input type="text" id="reportTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <div class="row" style="margin-top:10px; gap:8px;">
           <button class="btn btn-ghost btn-full btn-sm" onclick="loadReportForDate()">Xem khoảng ngày này</button>
           <button class="btn btn-ghost btn-full btn-sm" onclick="renderReport()">Về hôm nay</button>
@@ -735,9 +777,9 @@
         <select id="payrollEmployeeSelect"></select>
 
         <label class="field-label" style="margin-top:10px;">Từ ngày</label>
-        <input type="date" id="payrollFrom">
+        <input type="text" id="payrollFrom" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
         <label class="field-label" style="margin-top:10px;">Đến ngày</label>
-        <input type="date" id="payrollTo">
+        <input type="text" id="payrollTo" class="date-input-vn" readonly placeholder="dd/mm/yyyy">
 
         <button class="btn btn-ghost btn-full btn-sm" style="margin-top:10px;" onclick="loadPayrollDetail()">Xem chấm công &amp; tính lương</button>
         <div id="payrollDetailResult" style="margin-top:10px;font-size:13px;color:var(--ink-soft);"></div>
@@ -864,6 +906,8 @@ async function doLogin(){
     document.querySelector('.tab-btn[data-tab="luong"]').style.display = currentUser.role === 'Chu' ? 'flex' : 'none';
     document.getElementById('chamCongHistoryTitle').textContent = currentUser.role === 'Chu' ? 'Lịch sử chấm công' : 'Lịch sử chấm công của bạn';
     document.getElementById('myStatusCard').style.display = currentUser.role === 'Chu' ? 'none' : 'block';
+    // Xuất file Excel/CSV chỉ dành cho tài khoản Chủ — nhân viên không cần tính năng này.
+    document.getElementById('chamCongExportBtn').style.display = currentUser.role === 'Chu' ? '' : 'none';
     // Gộp 3 lệnh (trạng thái/lịch sử chấm công hôm nay + lịch xếp ca tuần + đóng gói chờ trả đồ)
     // thành 1 lần gọi duy nhất thay vì bắn riêng từng lệnh — đỡ chậm hẳn lúc vừa đăng nhập.
     if(!shiftWeekStart) shiftWeekStart = mondayOf_(new Date());
@@ -927,11 +971,129 @@ function attachMoneyInput(id){
     el.value = digits ? formatVNMoney(digits) : '';
   });
 }
-['packageAmount','expenseAmount'].forEach(attachMoneyInput);
+['packageAmount','expenseAmount','payrollBonusPerformance','payrollOvertimePay','payrollGasAllowance','payrollLunchAllowance','payrollUnpaidLeave','payrollAdvance','payrollLatePenalty'].forEach(attachMoneyInput);
+
+// ---------- lịch chọn ngày tự viết (dd/mm/yyyy cố định, không phụ thuộc ngôn ngữ trình duyệt) ----------
+// Input vẫn giữ id cũ và ".value" vẫn trả về đúng chuỗi ISO "yyyy-MM-dd" như input type=date trước đây
+// (nhờ override riêng thuộc tính value trên từng phần tử) — nên toàn bộ code đọc/ghi .value ở nơi khác
+// trong file này không cần sửa gì thêm. Chỉ phần HIỂN THỊ (chữ trong ô) là do ta tự vẽ theo dd/mm/yyyy.
+const VN_MONTH_NAMES_ = ['Tháng 1','Tháng 2','Tháng 3','Tháng 4','Tháng 5','Tháng 6','Tháng 7','Tháng 8','Tháng 9','Tháng 10','Tháng 11','Tháng 12'];
+const VN_DOW_NAMES_ = ['CN','T2','T3','T4','T5','T6','T7'];
+const nativeInputValueDesc_ = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value');
+
+function isoToVNDisplay_(iso){
+  if(!iso) return '';
+  const [y,m,d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+function pad2_(n){ return String(n).padStart(2,'0'); }
+function dateToIso_(d){ return `${d.getFullYear()}-${pad2_(d.getMonth()+1)}-${pad2_(d.getDate())}`; }
+
+function makeVNDateInput_(id){
+  const el = document.getElementById(id);
+  if(!el || el.dataset.vnDateReady) return;
+  el.dataset.vnDateReady = '1';
+  el.readOnly = true;
+  el.classList.add('date-input-vn');
+  if(!el.placeholder) el.placeholder = 'dd/mm/yyyy';
+  let isoVal = '';
+  Object.defineProperty(el, 'value', {
+    configurable: true,
+    get(){ return isoVal; },
+    set(v){
+      isoVal = v || '';
+      nativeInputValueDesc_.set.call(el, isoToVNDisplay_(isoVal));
+    }
+  });
+  el.addEventListener('click', () => openVNCalendar_(el));
+}
+
+let vnCalActiveInput_ = null;
+let vnCalYear_ = 0, vnCalMonth_ = 0; // month: 0-11
+
+function openVNCalendar_(el){
+  vnCalActiveInput_ = el;
+  const base = el.value ? new Date(el.value + 'T00:00:00') : new Date();
+  vnCalYear_ = base.getFullYear();
+  vnCalMonth_ = base.getMonth();
+  renderVNCalendar_();
+  const popup = document.getElementById('vnCalPopup');
+  popup.style.display = 'block';
+  const rect = el.getBoundingClientRect();
+  const popupWidth = 280;
+  let left = rect.left;
+  if(left + popupWidth > window.innerWidth - 8) left = window.innerWidth - popupWidth - 8;
+  if(left < 8) left = 8;
+  let top = rect.bottom + 6;
+  if(top + 320 > window.innerHeight){ top = Math.max(8, rect.top - 326); }
+  popup.style.left = left + 'px';
+  popup.style.top = top + 'px';
+}
+function closeVNCalendar_(){
+  const popup = document.getElementById('vnCalPopup');
+  if(popup) popup.style.display = 'none';
+  vnCalActiveInput_ = null;
+}
+function vnCalNav_(delta){
+  vnCalMonth_ += delta;
+  if(vnCalMonth_ < 0){ vnCalMonth_ = 11; vnCalYear_--; }
+  if(vnCalMonth_ > 11){ vnCalMonth_ = 0; vnCalYear_++; }
+  renderVNCalendar_();
+}
+function vnCalToday_(){
+  if(!vnCalActiveInput_) return;
+  vnCalActiveInput_.value = dateToIso_(new Date());
+  closeVNCalendar_();
+}
+function vnCalPick_(iso){
+  if(!vnCalActiveInput_) return;
+  vnCalActiveInput_.value = iso;
+  closeVNCalendar_();
+}
+function renderVNCalendar_(){
+  document.getElementById('vnCalTitle').textContent = `${VN_MONTH_NAMES_[vnCalMonth_]}, ${vnCalYear_}`;
+  document.getElementById('vnCalDow').innerHTML = VN_DOW_NAMES_.map(n=>`<span>${n}</span>`).join('');
+
+  const todayIso = dateToIso_(new Date());
+  const selectedIso = vnCalActiveInput_ ? vnCalActiveInput_.value : '';
+  const firstOfMonth = new Date(vnCalYear_, vnCalMonth_, 1);
+  const startOffset = firstOfMonth.getDay(); // 0=CN
+  const daysInMonth = new Date(vnCalYear_, vnCalMonth_+1, 0).getDate();
+  const daysInPrevMonth = new Date(vnCalYear_, vnCalMonth_, 0).getDate();
+
+  const cells = [];
+  for(let i=startOffset-1;i>=0;i--){
+    const dayNum = daysInPrevMonth - i;
+    cells.push({ dayNum, outside:true, iso:null });
+  }
+  for(let d=1; d<=daysInMonth; d++){
+    cells.push({ dayNum:d, outside:false, iso:`${vnCalYear_}-${pad2_(vnCalMonth_+1)}-${pad2_(d)}` });
+  }
+  let nextDay = 1;
+  while(cells.length % 7 !== 0){
+    cells.push({ dayNum:nextDay++, outside:true, iso:null });
+  }
+
+  document.getElementById('vnCalGrid').innerHTML = cells.map(c=>{
+    if(c.outside) return `<button type="button" class="vn-cal-day outside" disabled>${c.dayNum}</button>`;
+    const cls = ['vn-cal-day'];
+    if(c.iso === todayIso) cls.push('today');
+    if(c.iso === selectedIso) cls.push('selected');
+    return `<button type="button" class="${cls.join(' ')}" onclick="vnCalPick_('${c.iso}')">${c.dayNum}</button>`;
+  }).join('');
+}
+document.addEventListener('click', (e)=>{
+  const popup = document.getElementById('vnCalPopup');
+  if(!popup || popup.style.display === 'none') return;
+  if(popup.contains(e.target) || e.target.classList.contains('date-input-vn')) return;
+  closeVNCalendar_();
+});
+
+['chamCongHistoryFrom','chamCongHistoryTo','traDoHistoryFrom','traDoHistoryTo','reportFrom','reportTo','expenseHistoryFrom','expenseHistoryTo','expenseDate','packageHistoryFrom','packageHistoryTo','payrollFrom','payrollTo'].forEach(makeVNDateInput_);
 
 (function initDateInputs(){
   const d = new Date();
-  const iso = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const iso = dateToIso_(d);
   ['chamCongHistoryFrom','chamCongHistoryTo','traDoHistoryFrom','traDoHistoryTo','reportFrom','reportTo','expenseHistoryFrom','expenseHistoryTo','expenseDate','packageHistoryFrom','packageHistoryTo'].forEach(id=>{
     const el = document.getElementById(id);
     if(el) el.value = iso;
@@ -1011,7 +1173,9 @@ function renderPayrollAttendance(){
     </div>`;
 }
 
-function numVal_(id){ return Number(String(document.getElementById(id).value || '').replace(/[^\d.-]/g,'')) || 0; }
+// Các ô lương (thưởng/khấu trừ) giờ có dấu "." ngăn cách hàng nghìn giống ô Số tiền — bỏ hết ký tự
+// không phải số (kể cả dấu chấm) trước khi parse, tránh bị hiểu nhầm dấu chấm là số thập phân.
+function numVal_(id){ return Number(String(document.getElementById(id).value || '').replace(/\D/g,'')) || 0; }
 
 function recalcPayrollTotal(){
   if(!payrollDetail) return;
@@ -1495,7 +1659,8 @@ const DAY_LABELS_ = ['CN','T2','T3','T4','T5','T6','T7'];
 async function renderShiftWeek(rows, isOwner, fromDateStr){
   const allEmployees = await ensureEmployeeList();
   // Nhân viên Full time làm ca cố định 9h-18h mỗi ngày, không cần xếp ca — chỉ Part time mới hiện ở lưới này.
-  const employees = allEmployees.filter(e => (e.employeeType || 'Part time') !== 'Full time');
+  // Tài khoản Chủ không hiện trong danh sách xếp ca (Chủ không tự xếp ca cho mình).
+  const employees = allEmployees.filter(e => (e.employeeType || 'Part time') !== 'Full time' && !e.isOwnerAccount);
   const gridWrap = document.getElementById('shiftGridWrap');
   const saveBtn = document.getElementById('saveShiftBtn');
   document.getElementById('shiftSectionTitle').textContent = isOwner ? 'Sắp xếp ca làm (Chủ)' : 'Ca làm tuần này';
@@ -1929,7 +2094,7 @@ function renderDeliveredList(){
 
   if(notices.length===0){
     el.innerHTML = deliveredFilter==='unconfirmed'
-      ? '<div class="empty-state">Không có đơn nào chưa xác nhận.</div>'
+      ? '<div class="empty-state">Không có đơn nào chưa thanh toán.</div>'
       : `<div class="empty-state">Chưa có thông báo trả đồ nào${currentDeliveredRange ? ' trong khoảng thời gian này' : ' hôm nay'}.</div>`;
     return;
   }
@@ -1944,8 +2109,8 @@ function renderDeliveredList(){
           ${o.deliveryMethod ? `<span class="method-tag">${o.deliveryMethod}</span>` : ''}
           ${o.method ? `<span class="method-tag">${o.method}</span>` : ''}
           ${lastDeliveredIsOwner ? `<button class="confirm-btn ${o.confirmed?'yes':'no'}" onclick="toggleConfirm('${o.orderId}', ${!o.confirmed})">
-            ${o.confirmed ? 'Đã xác nhận ✓' : 'Chờ xác nhận'}
-          </button>` : (o.confirmed ? '<span class="method-tag" style="background:#E4F3EC;color:var(--brand-dark);">Đã xác nhận</span>' : '<span class="method-tag">Chờ xác nhận</span>')}
+            ${o.confirmed ? 'Đã thanh toán ✓' : 'Chờ thanh toán'}
+          </button>` : (o.confirmed ? '<span class="method-tag" style="background:#E4F3EC;color:var(--brand-dark);">Đã thanh toán</span>' : '<span class="method-tag">Chờ thanh toán</span>')}
         </div>
         ${lastDeliveredIsOwner ? `<div style="display:flex;gap:6px;">
           <button class="confirm-btn no" onclick="editReturnNotice('${o.orderId}')">Sửa</button>
