@@ -899,6 +899,7 @@ async function doLogin(){
   const errEl = document.getElementById('loginError');
   errEl.textContent = '';
   if(!pin){ errEl.textContent = 'Vui lòng nhập mã PIN.'; return; }
+  showBusy('Đang đăng nhập...');
   try{
     const res = await fetch(WEBAPP_URL, {
       method:'POST',
@@ -940,6 +941,8 @@ async function doLogin(){
     switchTab(currentUser.role === 'Chu' ? 'baocao' : 'chamcong');
   } catch(err){
     errEl.textContent = 'Không kết nối được server (' + err.message + '). Kiểm tra WEBAPP_URL trong file Index có đúng với link Web App hiện tại (Deploy > Manage deployments) không.';
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1145,8 +1148,9 @@ async function loadPayrollDetail(){
   const resultEl = document.getElementById('payrollDetailResult');
   if(!employeeId){ resultEl.textContent = 'Vui lòng chọn nhân viên.'; return; }
   if(!fromIso || !toIso){ resultEl.textContent = 'Vui lòng chọn khoảng ngày.'; return; }
-  resultEl.textContent = 'Đang tải...';
+  resultEl.textContent = '';
   document.getElementById('payrollHistoryCard').style.display = 'none';
+  showBusy('Đang tải dữ liệu lương...');
   try{
     const r = await apiCall('getPayrollDetail', { employeeId, from: toVNDate(fromIso), to: toVNDate(toIso) });
     payrollDetail = r;
@@ -1163,6 +1167,8 @@ async function loadPayrollDetail(){
     resultEl.textContent = 'Lỗi: ' + err.message;
     document.getElementById('payrollAttendanceCard').style.display = 'none';
     document.getElementById('payrollCalcCard').style.display = 'none';
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1218,7 +1224,8 @@ function buildPayrollPayload_(){
 async function savePayrollDetailed(){
   if(!payrollDetail){ alert('Vui lòng bấm "Xem chấm công & tính lương" trước.'); return; }
   const resultEl = document.getElementById('payrollSendResult');
-  resultEl.textContent = 'Đang lưu...';
+  resultEl.textContent = '';
+  showBusy('Đang lưu phiếu lương...');
   try{
     await apiCall('savePayrollDetail', buildPayrollPayload_());
     resultEl.textContent = 'Đã lưu phiếu lương.';
@@ -1227,6 +1234,8 @@ async function savePayrollDetailed(){
     if(card.style.display !== 'none') loadPayrollHistory();
   } catch(err){
     resultEl.textContent = 'Lỗi: ' + err.message;
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1237,12 +1246,14 @@ async function loadPayrollHistory(){
   const card = document.getElementById('payrollHistoryCard');
   const wrap = document.getElementById('payrollHistoryWrap');
   card.style.display = 'block';
-  wrap.innerHTML = '<div class="empty-state">Đang tải...</div>';
+  showBusy('Đang tải lịch sử phiếu lương...');
   try{
     const r = await apiCall('getPayrollDetailHistory', { employeeId });
     renderPayrollHistory(r.rows || []);
   } catch(err){
     wrap.innerHTML = '<div class="empty-state">Lỗi: ' + err.message + '</div>';
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1289,12 +1300,15 @@ async function sendPayrollEmailNow(){
   if(!payrollDetail){ alert('Vui lòng bấm "Xem chấm công & tính lương" trước.'); return; }
   if(!payrollDetail.email){ alert('Nhân viên này chưa có email trong hồ sơ (thêm ở Firestore > full_employees > email).'); return; }
   const resultEl = document.getElementById('payrollSendResult');
-  resultEl.textContent = 'Đang gửi email...';
+  resultEl.textContent = '';
+  showBusy('Đang gửi email...');
   try{
     await apiCall('sendPayrollEmail', buildPayrollPayload_());
     resultEl.textContent = `Đã gửi email phiếu lương tới ${payrollDetail.email}.`;
   } catch(err){
     resultEl.textContent = 'Lỗi: ' + err.message;
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1474,7 +1488,7 @@ function toDriveThumbUrl_(url){
 async function loadAttendanceLog(dataOverride){
   const el = document.getElementById('attendanceLog');
   if(!currentUser) return;
-  if(!dataOverride) el.innerHTML = '<div class="empty-state">Đang tải...</div>';
+  if(!dataOverride) showBusy('Đang tải nhật ký ảnh...');
   try{
     const r = dataOverride || await apiCall('getCheckInHistory', {});
     const recs = r.records || [];
@@ -1504,6 +1518,8 @@ async function loadAttendanceLog(dataOverride){
     `).join('');
   } catch(err){
     el.innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+  } finally{
+    if(!dataOverride) hideBusy();
   }
 }
 
@@ -1563,7 +1579,7 @@ async function loadCheckInHistory(){
   const toIso = document.getElementById('chamCongHistoryTo').value;
   const el = document.getElementById('chamCongHistoryResult');
   if(!fromIso || !toIso){ el.innerHTML = '<div class="empty-state">Vui lòng chọn khoảng ngày.</div>'; return; }
-  el.innerHTML = 'Đang tải...';
+  showBusy('Đang tải lịch sử chấm công...');
   try{
     const r = await apiCall('getCheckInHistory', { from: toVNDate(fromIso), to: toVNDate(toIso) });
     lastChamCongRecords = r.records || [];
@@ -1571,6 +1587,8 @@ async function loadCheckInHistory(){
     renderLateSummary();
   } catch(err){
     el.innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1719,12 +1737,14 @@ async function loadShiftWeek(dataOverride){
   const to = fmtVN_(addDays_(shiftWeekStart, 6));
   document.getElementById('shiftWeekLabel').textContent = `${from.slice(0,5)} - ${to}`;
   const gridWrap = document.getElementById('shiftGridWrap');
-  if(!dataOverride) gridWrap.innerHTML = '<div class="empty-state">Đang tải...</div>';
+  if(!dataOverride) showBusy('Đang tải ca làm...');
   try{
     const r = dataOverride || await apiCall('getShiftRange', { from, to });
     await renderShiftWeek(r.rows || [], r.isOwner, from);
   } catch(err){
     gridWrap.innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+  } finally{
+    if(!dataOverride) hideBusy();
   }
 }
 
@@ -1791,12 +1811,15 @@ async function saveShiftWeek(){
     assignments.push({ date: sel.dataset.date, employeeId: sel.dataset.emp, employeeName: sel.dataset.name, shift: sel.value });
   });
   const resultEl = document.getElementById('shiftSaveResult');
-  resultEl.textContent = 'Đang lưu...';
+  resultEl.textContent = '';
+  showBusy('Đang lưu ca làm...');
   try{
     await apiCall('saveShift', { assignments });
     resultEl.textContent = 'Đã lưu ca làm tuần này.';
   } catch(err){
     resultEl.textContent = 'Lỗi: ' + err.message;
+  } finally{
+    hideBusy();
   }
 }
 
@@ -1895,7 +1918,7 @@ async function loadPackageHistory(dataOverride){
   const toIso = document.getElementById('packageHistoryTo').value;
   const el = document.getElementById('packageHistoryResult');
   if(!fromIso || !toIso){ el.innerHTML = '<div class="empty-state">Vui lòng chọn khoảng ngày.</div>'; return; }
-  if(!dataOverride) el.innerHTML = 'Đang tải...';
+  if(!dataOverride) showBusy('Đang tải lịch sử đóng gói...');
   try{
     const r = dataOverride || await apiCall('getPackages', { from: toVNDate(fromIso), to: toVNDate(toIso) });
     lastPackageRows = r.rows || [];
@@ -1903,6 +1926,8 @@ async function loadPackageHistory(dataOverride){
     renderPackageHistoryList();
   } catch(err){
     el.innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+  } finally{
+    if(!dataOverride) hideBusy();
   }
 }
 
@@ -2196,11 +2221,14 @@ function renderDeliveredList(){
 }
 
 async function toggleConfirm(orderId, newVal){
+  showBusy('Đang cập nhật...');
   try{
     await apiCall('confirmPayment', { orderId, confirmed: newVal });
     renderDeliveredOrders(currentDeliveredRange);
   } catch(err){
     alert('Không xác nhận được: ' + err.message);
+  } finally{
+    hideBusy();
   }
 }
 
@@ -2216,7 +2244,7 @@ let reportCurrentRange = null;
 async function renderReport(rangeOverride){
   reportCurrentRange = rangeOverride || null;
   const statEls = ['statLate','statOrders','statRevenue','statRevenueCash','statRevenueTransfer','statExpense','statProfit','statUnconfirmed','statPendingReturn'].map(id=>document.getElementById(id));
-  statEls.forEach(el=>el.textContent = '…');
+  showBusy('Đang tải báo cáo...');
   try{
     const params = rangeOverride ? { from: rangeOverride.from, to: rangeOverride.to } : {};
     const r = await apiCall('getReport', params);
@@ -2237,6 +2265,8 @@ async function renderReport(rangeOverride){
     document.getElementById('statPendingReturn').textContent = r.pendingReturnCount || 0;
   } catch(err){
     statEls.forEach(el=>el.textContent = '—');
+  } finally{
+    hideBusy();
   }
 }
 
@@ -2381,7 +2411,7 @@ async function loadExpenseHistory(){
   const category = document.getElementById('expenseCategoryFilter').value;
   const el = document.getElementById('expenseHistoryResult');
   if(!fromIso || !toIso){ el.innerHTML = '<div class="empty-state">Vui lòng chọn khoảng ngày.</div>'; return; }
-  el.innerHTML = 'Đang tải...';
+  showBusy('Đang tải chi phí...');
   try{
     const params = { from: toVNDate(fromIso), to: toVNDate(toIso) };
     if(category && category !== 'all') params.category = category;
@@ -2390,6 +2420,8 @@ async function loadExpenseHistory(){
     renderExpenseList();
   } catch(err){
     el.innerHTML = `<div class="empty-state">Không tải được: ${err.message}</div>`;
+  } finally{
+    hideBusy();
   }
 }
 
