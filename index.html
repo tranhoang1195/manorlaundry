@@ -1003,6 +1003,13 @@ function toVNDate(isoStr){
   const [y,m,d] = isoStr.split('-');
   return `${d}/${m}/${y}`;
 }
+// Ngày hôm nay dd/MM/yyyy theo giờ máy khách — chỉ dùng để hiện tạm (optimistic UI) trước khi có
+// phản hồi thật từ server, không dùng để lưu dữ liệu.
+function todayVNClient_(){
+  const d = new Date();
+  const p = n => String(n).padStart(2, '0');
+  return `${p(d.getDate())}/${p(d.getMonth()+1)}/${d.getFullYear()}`;
+}
 
 // ---------- định dạng số tiền: tự thêm dấu "." ngăn cách hàng nghìn ngay khi gõ ----------
 // Các ô số tiền là input type="text" (không phải number) để có thể hiển thị dấu chấm —
@@ -1491,23 +1498,51 @@ function triggerCheck(type){
 document.getElementById('photoInput').addEventListener('change', function(e){
   const file = e.target.files[0];
 
-  const finish = async (photoDataUrl) => {
-    showBusy('Đang lưu chấm công...');
-    try{
-      const res = await apiCall('checkinout', { type: pendingCheckType, photo: photoDataUrl });
-      if(currentUser.role !== 'Chu') loadMyStatus();
-      loadAttendanceLog();
-      if(pendingCheckType === 'in' && res.late){
+  // Optimistic UI: hiện ngay kết quả giả định (thẻ ảnh + trạng thái) trước khi có phản hồi server,
+  // gọi API ngầm phía sau — chỉ rollback + báo lỗi nếu API thất bại.
+  const finish = (photoDataUrl) => {
+    const type = pendingCheckType;
+    const tempId = 'tmp_att_' + Date.now();
+    const nowLabel = new Date().toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+    const logEl = document.getElementById('attendanceLog');
+    if(logEl){
+      if(logEl.querySelector('.empty-state')) logEl.innerHTML = '';
+      const card = document.createElement('div');
+      card.className = 'polaroid';
+      card.id = tempId;
+      card.style.opacity = '0.55';
+      card.innerHTML = `
+        <div class="tape"></div>
+        ${photoDataUrl ? `<img src="${photoDataUrl}">` : `<div class="ph-fallback">📷</div>`}
+        <div class="meta">
+          <div class="top-line">
+            <span class="name">${currentUser.name}</span>
+            <span class="badge ${type==='in'?'badge-in':'badge-out'}">${type==='in'?'Check-in':'Check-out'} · đang lưu...</span>
+          </div>
+          <div class="time mono">${nowLabel}</div>
+        </div>`;
+      logEl.prepend(card);
+    }
+
+    apiCall('checkinout', { type, photo: photoDataUrl }).then(async (res) => {
+      // Tải lại nhật ký/trạng thái thật (không hiện toast, đã có kết quả tạm ở trên rồi) để thay
+      // thẻ tạm bằng dữ liệu chính xác từ server (ca, giờ, đi muộn/tăng ca...).
+      try{
+        const hist = await apiCall('getCheckInHistory', {});
+        loadAttendanceLog(hist);
+        if(currentUser.role !== 'Chu') loadMyStatus(hist);
+      } catch(e){ /* giữ nguyên thẻ tạm nếu tải lại lỗi — thao tác chấm công đã lưu thành công */ }
+      if(type === 'in' && res.late){
         alert(`Bạn đã đến muộn ${res.lateMinutes} phút (ca ${res.ca}).`);
       }
-      if(pendingCheckType === 'out' && res.overtimeMinutes > 0){
+      if(type === 'out' && res.overtimeMinutes > 0){
         alert(`Phát sinh tăng ca ${res.overtimeMinutes} phút hôm nay, chờ Chủ duyệt.`);
       }
-    } catch(err){
+    }).catch(err => {
+      const tempEl = document.getElementById(tempId);
+      if(tempEl) tempEl.remove();
       alert('Không lưu được vào hệ thống: ' + err.message);
-    } finally{
-      hideBusy();
-    }
+    });
   };
 
   if(file){
@@ -1958,27 +1993,61 @@ document.getElementById('billPhotoInput').addEventListener('change', function(e)
   e.target.value = '';
 });
 
-async function sendPackage(){
+function sendPackage(){
   if(!currentUser){ alert('Vui lòng đăng nhập trước.'); return; }
   const customer = document.getElementById('packageCustomerName').value.trim();
   if(!customer){ alert('Vui lòng nhập tên khách hàng.'); return; }
   const amount = parseInt(document.getElementById('packageAmount').value.replace(/\D/g,'')) || 0;
   if(!amount){ alert('Vui lòng nhập số tiền.'); return; }
+  const billPhoto = pendingBillPhoto;
+  const isEdit = !!editingPackageId;
+  const editId = editingPackageId;
 
-  showBusy(editingPackageId ? 'Đang cập nhật...' : 'Đang lưu đóng gói...');
-  try{
-    if(editingPackageId){
-      await apiCall('updatePackage', { packageId: editingPackageId, customer, amount, billPhoto: pendingBillPhoto });
-    } else {
-      await apiCall('createPackage', { customer, amount, billPhoto: pendingBillPhoto });
+  // Optimistic UI: cập nhật giao diện ngay (giả định thành công), gọi API ngầm phía sau —
+  // chỉ rollback + báo lỗi nếu API thất bại.
+  let tempId = '';
+  if(isEdit){
+    const row = lastPackageRows.find(x => x.packageId === editId);
+    if(row){ row.customer = customer; row.amount = amount; }
+    renderPackageHistoryList();
+  } else {
+    tempId = 'tmp_pkg_' + Date.now();
+    const el = document.getElementById('packageHistoryResult');
+    if(el){
+      if(el.querySelector('.empty-state')) el.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'delivered-row';
+      row.id = tempId;
+      row.style.opacity = '0.55';
+      row.innerHTML = `
+        <div>
+          <div class="who">${customer}</div>
+          <div class="sub">${todayVNClient_()} · ${amount.toLocaleString('vi-VN')}đ · đang lưu...</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <span class="method-tag">Chưa trả đồ</span>
+        </div>`;
+      el.prepend(row);
     }
-    cancelPackageEdit();
-    refreshPackageTab();
-  } catch(err){
-    alert('Không lưu được: ' + err.message);
-  } finally{
-    hideBusy();
   }
+  cancelPackageEdit();
+
+  const action = isEdit ? 'updatePackage' : 'createPackage';
+  const params = isEdit
+    ? { packageId: editId, customer, amount, billPhoto }
+    : { customer, amount, billPhoto };
+
+  apiCall(action, params).then(() => {
+    refreshPackageTab();
+  }).catch(err => {
+    if(tempId){
+      const t = document.getElementById(tempId);
+      if(t) t.remove();
+    } else {
+      refreshPackageTab(); // hoàn tác thay đổi sửa lạc quan bằng cách tải lại dữ liệu thật
+    }
+    alert('Không lưu được: ' + err.message);
+  });
 }
 
 function editPackage(packageId){
@@ -2009,18 +2078,22 @@ function cancelPackageEdit(){
   document.getElementById('donggoiCancelBtn').style.display = 'none';
 }
 
-async function deletePackage(packageId){
+function deletePackage(packageId){
   if(!confirm('Xoá đơn đóng gói này?')) return;
-  showBusy('Đang xoá...');
-  try{
-    await apiCall('deletePackage', { packageId });
-    if(editingPackageId === packageId) cancelPackageEdit();
+  if(editingPackageId === packageId) cancelPackageEdit();
+
+  // Optimistic UI: xoá khỏi danh sách hiển thị ngay, gọi API ngầm phía sau — nếu lỗi thì tải lại
+  // dữ liệu thật để phục hồi.
+  lastPackageRows = lastPackageRows.filter(x => x.packageId !== packageId);
+  pendingPackages = pendingPackages.filter(x => x.packageId !== packageId);
+  renderPackageHistoryList();
+
+  apiCall('deletePackage', { packageId }).then(() => {
     refreshPackageTab();
-  } catch(err){
+  }).catch(err => {
+    refreshPackageTab();
     alert('Không xoá được: ' + err.message);
-  } finally{
-    hideBusy();
-  }
+  });
 }
 
 async function loadPackageHistory(dataOverride){
@@ -2186,7 +2259,7 @@ function selectDeliveryMethod(m){
 
 let editingOrderId = null;
 
-async function sendReturnNotice(){
+function sendReturnNotice(){
   if(!currentUser){ alert('Vui lòng đăng nhập trước.'); return; }
   if(!editingOrderId && !selectedPackage){ alert('Vui lòng chọn khách hàng đã đóng gói.'); return; }
   const customer = document.getElementById('customerName').value.trim();
@@ -2196,20 +2269,58 @@ async function sendReturnNotice(){
   if(!selectedMethod){ alert('Vui lòng chọn hình thức thanh toán.'); return; }
   if(!selectedDeliveryMethod){ alert('Vui lòng chọn hình thức trả đồ.'); return; }
 
-  showBusy(editingOrderId ? 'Đang cập nhật...' : 'Đang gửi thông báo...');
-  try{
-    if(editingOrderId){
-      await apiCall('updateReturnNotice', { orderId: editingOrderId, customer, amount, method: selectedMethod, deliveryMethod: selectedDeliveryMethod });
-    } else {
-      await apiCall('createReturnNotice', { customer, amount, method: selectedMethod, deliveryMethod: selectedDeliveryMethod, packageId: selectedPackage.packageId });
+  const isEdit = !!editingOrderId;
+  const editId = editingOrderId;
+  const packageId = selectedPackage ? selectedPackage.packageId : null;
+  const method = selectedMethod, deliveryMethod = selectedDeliveryMethod;
+
+  // Optimistic UI: cập nhật giao diện ngay (giả định thành công), gọi API ngầm phía sau —
+  // chỉ rollback + báo lỗi nếu API thất bại.
+  let tempId = '';
+  if(isEdit){
+    const row = lastDeliveredNotices.find(x => x.orderId === editId);
+    if(row){ row.customer = customer; row.amount = amount; row.method = method; row.deliveryMethod = deliveryMethod; }
+    renderDeliveredList();
+  } else if(!currentDeliveredRange){
+    // Chỉ chèn thẻ tạm khi đang xem "hôm nay" (đơn mới luôn thuộc hôm nay).
+    tempId = 'tmp_dh_' + Date.now();
+    const el = document.getElementById('deliveredList');
+    if(el){
+      if(el.querySelector('.empty-state')) el.innerHTML = '';
+      const row = document.createElement('div');
+      row.className = 'delivered-row';
+      row.id = tempId;
+      row.style.opacity = '0.55';
+      row.innerHTML = `
+        <div>
+          <div class="who">${customer}</div>
+          <div class="sub">${todayVNClient_()} · ${amount.toLocaleString('vi-VN')}đ · đang gửi...</div>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+          <span class="method-tag">${deliveryMethod}</span>
+          <span class="method-tag">${method}</span>
+        </div>`;
+      el.prepend(row);
     }
-    cancelReturnNoticeEdit();
-    refreshDonHangTab();
-  } catch(err){
-    alert('Không lưu được thông báo: ' + err.message);
-  } finally{
-    hideBusy();
   }
+  cancelReturnNoticeEdit();
+
+  const action = isEdit ? 'updateReturnNotice' : 'createReturnNotice';
+  const params = isEdit
+    ? { orderId: editId, customer, amount, method, deliveryMethod }
+    : { customer, amount, method, deliveryMethod, packageId };
+
+  apiCall(action, params).then(() => {
+    refreshDonHangTab();
+  }).catch(err => {
+    if(tempId){
+      const t = document.getElementById(tempId);
+      if(t) t.remove();
+    } else {
+      refreshDonHangTab(); // hoàn tác thay đổi sửa lạc quan bằng cách tải lại dữ liệu thật
+    }
+    alert('Không lưu được thông báo: ' + err.message);
+  });
 }
 
 // Chủ bấm "Sửa" trên 1 dòng đã trả đồ -> nạp lại dữ liệu vào form phía trên, chuyển form sang chế độ Sửa.
@@ -2250,18 +2361,21 @@ function cancelReturnNoticeEdit(){
   document.getElementById('donhangCancelBtn').style.display = 'none';
 }
 
-async function deleteReturnNotice(orderId){
+function deleteReturnNotice(orderId){
   if(!confirm('Xoá thông báo trả đồ này?')) return;
-  showBusy('Đang xoá...');
-  try{
-    await apiCall('deleteReturnNotice', { orderId });
-    if(editingOrderId === orderId) cancelReturnNoticeEdit();
+  if(editingOrderId === orderId) cancelReturnNoticeEdit();
+
+  // Optimistic UI: xoá khỏi danh sách hiển thị ngay, gọi API ngầm phía sau — nếu lỗi thì tải lại
+  // dữ liệu thật để phục hồi.
+  lastDeliveredNotices = lastDeliveredNotices.filter(x => x.orderId !== orderId);
+  renderDeliveredList();
+
+  apiCall('deleteReturnNotice', { orderId }).then(() => {
     refreshDonHangTab();
-  } catch(err){
+  }).catch(err => {
+    refreshDonHangTab();
     alert('Không xoá được: ' + err.message);
-  } finally{
-    hideBusy();
-  }
+  });
 }
 
 // ---------- đã trả đồ hôm nay ----------
@@ -2331,16 +2445,19 @@ function renderDeliveredList(){
   `).join('');
 }
 
-async function toggleConfirm(orderId, newVal){
-  showBusy('Đang cập nhật...');
-  try{
-    await apiCall('confirmPayment', { orderId, confirmed: newVal });
-    renderDeliveredOrders(currentDeliveredRange);
-  } catch(err){
+function toggleConfirm(orderId, newVal){
+  // Optimistic UI: đổi trạng thái ngay trên giao diện, gọi API ngầm phía sau — rollback lại +
+  // báo lỗi nếu API thất bại.
+  const row = lastDeliveredNotices.find(x => x.orderId === orderId);
+  const prevVal = row ? row.confirmed : null;
+  if(row){ row.confirmed = newVal; }
+  renderDeliveredList();
+
+  apiCall('confirmPayment', { orderId, confirmed: newVal }).catch(err => {
+    if(row){ row.confirmed = prevVal; }
+    renderDeliveredList();
     alert('Không xác nhận được: ' + err.message);
-  } finally{
-    hideBusy();
-  }
+  });
 }
 
 function loadReturnNoticesForDate(){
